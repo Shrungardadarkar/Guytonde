@@ -5,7 +5,32 @@ the harmonically correct target, while preserving vibrato, timbre, and
 timing. Not auto-tune, not a mixing tool. Full design in
 [`VOCAL_CORRECTION_SPEC.md`](./VOCAL_CORRECTION_SPEC.md).
 
-## Run the backend
+## Using it, no coding required (Mac)
+
+The webpage at **https://shrungardadarkar.github.io/Guytonde/** only handles
+the screen you see -- the actual audio processing runs on your own Mac in the
+background, so your audio is never uploaded anywhere. To start that
+background piece:
+
+1. Go to the repo's green **Code** button on GitHub > **Download ZIP**, then
+   unzip it.
+2. Open the unzipped folder > `vocal-correction` > `backend`.
+3. Double-click **`start-mac.command`**.
+   - The first time, macOS may say it's from an unidentified developer --
+     right-click the file, choose **Open**, then confirm. You only need to
+     do this once.
+   - The first run also takes a few minutes to set itself up (installing the
+     audio libraries). Later runs start in a few seconds.
+   - Leave the black terminal window open while you use the tool -- it's the
+     engine running. Once it prints `Uvicorn running on http://127.0.0.1:8000`,
+     it's ready.
+4. Open **https://shrungardadarkar.github.io/Guytonde/** in your browser and
+   use the tool as normal. Closing the terminal window stops the engine.
+
+If step 3 fails with something about "command line tools," open the Terminal
+app and run `xcode-select --install`, let that finish, then try step 3 again.
+
+## Run the backend (for developers)
 
 ```bash
 cd backend
