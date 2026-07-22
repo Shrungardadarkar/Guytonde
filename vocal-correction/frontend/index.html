@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vocal Tuning Correction</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="rack">
+    <div class="wordmark">
+      <h1>Vocal Tuning Correction</h1>
+      <span class="badge">v1</span>
+    </div>
+    <p class="subtitle">
+      Gently pulls a take's center pitch toward the harmonically correct target.
+      Preserves vibrato, timbre, timing. Not auto-tune.
+    </p>
+
+    <section class="module">
+      <p class="module-label">Source material</p>
+      <div class="slot-grid">
+        <div class="slot">
+          <span>Isolated vocals</span>
+          <label class="file-slot" for="vocalsFile">
+            <span class="filename placeholder" id="vocalsFilename">click to choose…</span>
+            <span class="pick">choose</span>
+          </label>
+          <input type="file" id="vocalsFile" accept=".wav,audio/wav,audio/x-wav" hidden />
+        </div>
+        <div class="slot">
+          <span>Rough mix</span>
+          <label class="file-slot" for="mixFile">
+            <span class="filename placeholder" id="mixFilename">click to choose…</span>
+            <span class="pick">choose</span>
+          </label>
+          <input type="file" id="mixFile" accept=".wav,audio/wav,audio/x-wav" hidden />
+        </div>
+        <div class="slot full text-slot">
+          <span>Parent scale</span>
+          <input type="text" id="scaleInput" placeholder='e.g. "G major"' value="G major" />
+        </div>
+      </div>
+      <div class="engage-row">
+        <button class="engage-btn" id="processBtn" disabled>Process</button>
+        <span class="engage-status" id="status">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">upload both files to begin</span>
+        </span>
+      </div>
+    </section>
+
+    <section class="module" id="dialsSection" hidden>
+      <p class="module-label">Correction</p>
+
+      <div class="fader-row">
+        <div class="fader-label">
+          <span class="name">Pull strength</span>
+          <span class="mode debounced">recomputes ~1s</span>
+        </div>
+        <div class="fader-track-wrap">
+          <div class="fader-ticks">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <input type="range" id="pullStrength" min="0" max="100" value="50" style="--fill: 50%" />
+        </div>
+        <div class="fader-readout" id="pullStrengthValue">50%</div>
+      </div>
+
+      <div class="fader-row">
+        <div class="fader-label">
+          <span class="name">Preserve original</span>
+          <span class="mode instant">live crossfade</span>
+        </div>
+        <div class="fader-track-wrap">
+          <div class="fader-ticks">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <input type="range" id="preserveOriginal" min="0" max="100" value="85" style="--fill: 85%" />
+        </div>
+        <div class="fader-readout" id="preserveOriginalValue">85%</div>
+      </div>
+    </section>
+
+    <section class="module" id="timelineSection" hidden>
+      <p class="module-label">Chord timeline &amp; correction</p>
+      <div class="strip" id="strip"></div>
+      <div class="strip-legend">
+        <span><span class="swatch" style="background: var(--good);"></span>corrected sharp</span>
+        <span><span class="swatch" style="background: var(--warn);"></span>corrected flat</span>
+        <span>bar height = cents applied (cap &plusmn;150&cent;)</span>
+      </div>
+
+      <div class="transport">
+        <button id="playPauseBtn">&#9654; play</button>
+        <button id="jumpOriginalBtn">original</button>
+        <button id="jumpCorrectedBtn">corrected</button>
+        <span class="spacer"></span>
+        <span class="time-readout" id="timeReadout">0:00 / 0:00</span>
+      </div>
+      <button class="download-btn" id="downloadBtn">Download corrected vocal</button>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

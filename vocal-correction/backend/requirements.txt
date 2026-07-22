@@ -1,0 +1,8 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+librosa>=0.10
+numpy>=1.24
+scipy>=1.11
+soundfile>=0.12
+pyworld>=0.3.4
+python-multipart>=0.0.9
