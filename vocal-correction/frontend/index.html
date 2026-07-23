@@ -84,6 +84,35 @@
       </div>
     </section>
 
+    <section class="module" id="waveformSection" hidden>
+      <p class="module-label">Waveform</p>
+
+      <div class="view-toggle" role="group" aria-label="Waveform view">
+        <button id="viewOriginalBtn" data-view="original">original</button>
+        <button id="viewCorrectedBtn" data-view="corrected">corrected</button>
+        <button id="viewBothBtn" data-view="both" class="active">both</button>
+      </div>
+
+      <div class="waveform-wrap" id="waveformWrap">
+        <canvas id="waveformCanvas"></canvas>
+        <canvas id="playheadCanvas"></canvas>
+      </div>
+      <div class="strip-legend">
+        <span><span class="swatch" style="background: var(--muted);"></span>original</span>
+        <span><span class="swatch" style="background: var(--accent);"></span>corrected</span>
+        <span>click/drag the waveform to scrub</span>
+      </div>
+
+      <div class="transport">
+        <button id="playPauseBtn">&#9654; play</button>
+        <button id="jumpOriginalBtn">hear original</button>
+        <button id="jumpCorrectedBtn">hear corrected</button>
+        <span class="spacer"></span>
+        <span class="time-readout" id="timeReadout">0:00 / 0:00</span>
+      </div>
+      <button class="download-btn" id="downloadBtn">Download corrected vocal</button>
+    </section>
+
     <section class="module" id="timelineSection" hidden>
       <p class="module-label">Chord timeline &amp; correction</p>
       <div class="strip" id="strip"></div>
@@ -92,15 +121,6 @@
         <span><span class="swatch" style="background: var(--warn);"></span>corrected flat</span>
         <span>bar height = cents applied (cap &plusmn;150&cent;)</span>
       </div>
-
-      <div class="transport">
-        <button id="playPauseBtn">&#9654; play</button>
-        <button id="jumpOriginalBtn">original</button>
-        <button id="jumpCorrectedBtn">corrected</button>
-        <span class="spacer"></span>
-        <span class="time-readout" id="timeReadout">0:00 / 0:00</span>
-      </div>
-      <button class="download-btn" id="downloadBtn">Download corrected vocal</button>
     </section>
   </main>
 

@@ -19,6 +19,13 @@ const els = {
   statusDot: document.getElementById("statusDot"),
   statusText: document.getElementById("statusText"),
   dialsSection: document.getElementById("dialsSection"),
+  waveformSection: document.getElementById("waveformSection"),
+  waveformWrap: document.getElementById("waveformWrap"),
+  waveformCanvas: document.getElementById("waveformCanvas"),
+  playheadCanvas: document.getElementById("playheadCanvas"),
+  viewOriginalBtn: document.getElementById("viewOriginalBtn"),
+  viewCorrectedBtn: document.getElementById("viewCorrectedBtn"),
+  viewBothBtn: document.getElementById("viewBothBtn"),
   timelineSection: document.getElementById("timelineSection"),
   pullStrength: document.getElementById("pullStrength"),
   pullStrengthValue: document.getElementById("pullStrengthValue"),
@@ -48,7 +55,10 @@ const state = {
   playbackStartedAt: 0, // AudioContext time when playback (re)started
   playbackOffset: 0,    // seconds into the buffer at that start
   pullDebounceTimer: null,
-  timeReadoutTimer: null,
+  rafId: null,
+  waveformMode: "both",
+  isScrubbing: false,
+  scrubWasPlaying: false,
 };
 
 function getAudioCtx() {
@@ -105,6 +115,75 @@ els.jumpOriginalBtn.addEventListener("click", () => setBlendSlider(100));
 els.jumpCorrectedBtn.addEventListener("click", () => setBlendSlider(0));
 els.downloadBtn.addEventListener("click", downloadCorrected);
 
+els.viewOriginalBtn.addEventListener("click", () => setWaveformMode("original"));
+els.viewCorrectedBtn.addEventListener("click", () => setWaveformMode("corrected"));
+els.viewBothBtn.addEventListener("click", () => setWaveformMode("both"));
+
+function setWaveformMode(mode) {
+  state.waveformMode = mode;
+  [els.viewOriginalBtn, els.viewCorrectedBtn, els.viewBothBtn].forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === mode);
+  });
+  renderWaveform();
+}
+
+function timeFromClientX(clientX) {
+  const rect = els.waveformWrap.getBoundingClientRect();
+  const ratio = rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0;
+  return ratio * state.durationSeconds;
+}
+
+function seekTo(seconds) {
+  state.playbackOffset = Math.max(0, Math.min(seconds, state.durationSeconds));
+  updateTimeReadout();
+  drawPlayhead();
+}
+
+function beginScrub(clientX) {
+  if (!state.originalBuffer) return;
+  state.isScrubbing = true;
+  state.scrubWasPlaying = state.isPlaying;
+  if (state.isPlaying) {
+    state.playbackOffset = currentPlaybackTime();
+    stopSources();
+    state.isPlaying = false;
+    stopTimeReadoutTicker();
+  }
+  seekTo(timeFromClientX(clientX));
+}
+
+function updateScrub(clientX) {
+  if (!state.isScrubbing) return;
+  seekTo(timeFromClientX(clientX));
+}
+
+function endScrub() {
+  if (!state.isScrubbing) return;
+  state.isScrubbing = false;
+  if (state.scrubWasPlaying) {
+    restartPlayback(state.playbackOffset);
+  }
+}
+
+els.waveformWrap.addEventListener("mousedown", (e) => beginScrub(e.clientX));
+window.addEventListener("mousemove", (e) => updateScrub(e.clientX));
+window.addEventListener("mouseup", endScrub);
+
+els.waveformWrap.addEventListener("touchstart", (e) => beginScrub(e.touches[0].clientX), { passive: true });
+window.addEventListener("touchmove", (e) => {
+  if (state.isScrubbing) updateScrub(e.touches[0].clientX);
+}, { passive: true });
+window.addEventListener("touchend", endScrub);
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    renderWaveform();
+    drawPlayhead();
+  }, 150);
+});
+
 function setBlendSlider(value) {
   els.preserveOriginal.value = String(value);
   els.preserveOriginal.style.setProperty("--fill", `${value}%`);
@@ -141,6 +220,8 @@ async function runAnalyze() {
   try {
     state.originalBuffer = await decodeFileToBuffer(vocalsFile);
     state.durationSeconds = state.originalBuffer.duration;
+    els.waveformSection.hidden = false;
+    renderWaveform();
 
     setStatus("uploading + analyzing (chords, pitch)…", "busy");
     const form = new FormData();
@@ -189,6 +270,7 @@ async function runCorrect() {
     state.correctedBuffer = await getAudioCtx().decodeAudioData(arrayBuffer);
 
     renderStrip();
+    renderWaveform();
 
     if (state.isPlaying) {
       restartPlayback(currentPlaybackTime());
@@ -245,6 +327,7 @@ function restartPlayback(offsetSeconds) {
     els.playPauseBtn.classList.remove("playing");
     stopTimeReadoutTicker();
     updateTimeReadout();
+    drawPlayhead();
   };
   state.sourceOriginal.onended = onEnded;
 
@@ -272,6 +355,7 @@ function togglePlayback() {
     els.playPauseBtn.classList.remove("playing");
     stopTimeReadoutTicker();
     updateTimeReadout();
+    drawPlayhead();
   } else {
     restartPlayback(state.playbackOffset);
   }
@@ -281,17 +365,102 @@ function updateTimeReadout() {
   els.timeReadout.textContent = `${formatTime(currentPlaybackTime())} / ${formatTime(state.durationSeconds)}`;
 }
 
+function playheadTick() {
+  updateTimeReadout();
+  drawPlayhead();
+  state.rafId = requestAnimationFrame(playheadTick);
+}
+
 function startTimeReadoutTicker() {
   stopTimeReadoutTicker();
-  state.timeReadoutTimer = setInterval(updateTimeReadout, 200);
-  updateTimeReadout();
+  playheadTick();
 }
 
 function stopTimeReadoutTicker() {
-  if (state.timeReadoutTimer) {
-    clearInterval(state.timeReadoutTimer);
-    state.timeReadoutTimer = null;
+  if (state.rafId) {
+    cancelAnimationFrame(state.rafId);
+    state.rafId = null;
   }
+}
+
+// --- Waveform: static original/corrected traces plus a live playhead,
+// drawn on two stacked canvases so the playhead can redraw every frame
+// without re-computing the (relatively expensive) min/max downsample. ---
+
+function sizeCanvasToWrap(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = els.waveformWrap.clientWidth;
+  const cssHeight = els.waveformWrap.clientHeight;
+  canvas.width = Math.max(1, Math.round(cssWidth * dpr));
+  canvas.height = Math.max(1, Math.round(cssHeight * dpr));
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, cssWidth, cssHeight };
+}
+
+function drawWaveformLayer(ctx, buffer, width, height, color, alpha) {
+  if (!buffer) return;
+  const data = buffer.getChannelData(0);
+  const step = Math.max(1, Math.ceil(data.length / width));
+  const amp = height / 2;
+
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  for (let x = 0; x < width; x++) {
+    let min = 1.0;
+    let max = -1.0;
+    const start = x * step;
+    const end = Math.min(start + step, data.length);
+    for (let i = start; i < end; i++) {
+      const v = data[i];
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    if (min > max) {
+      min = 0;
+      max = 0;
+    }
+    const y1 = amp - max * amp;
+    const y2 = amp - min * amp;
+    ctx.fillRect(x, y1, 1, Math.max(1, y2 - y1));
+  }
+  ctx.globalAlpha = 1;
+}
+
+function renderWaveform() {
+  if (!els.waveformWrap.clientWidth) return;
+  const { ctx, cssWidth, cssHeight } = sizeCanvasToWrap(els.waveformCanvas);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  const mutedColor = rootStyles.getPropertyValue("--muted").trim() || "#8b8d98";
+  const accentColor = rootStyles.getPropertyValue("--accent").trim() || "#e0a039";
+
+  const mode = state.waveformMode;
+  if (mode === "original" || mode === "both") {
+    drawWaveformLayer(ctx, state.originalBuffer, cssWidth, cssHeight, mutedColor, mode === "both" ? 0.55 : 0.9);
+  }
+  if (mode === "corrected" || mode === "both") {
+    drawWaveformLayer(ctx, state.correctedBuffer, cssWidth, cssHeight, accentColor, mode === "both" ? 0.6 : 0.9);
+  }
+
+  drawPlayhead();
+}
+
+function drawPlayhead() {
+  if (!els.waveformWrap.clientWidth) return;
+  const { ctx, cssWidth, cssHeight } = sizeCanvasToWrap(els.playheadCanvas);
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  if (!state.durationSeconds) return;
+
+  const x = (currentPlaybackTime() / state.durationSeconds) * cssWidth;
+  const accentColor = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#e0a039";
+  ctx.strokeStyle = accentColor;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, cssHeight);
+  ctx.stroke();
 }
 
 function renderStrip() {

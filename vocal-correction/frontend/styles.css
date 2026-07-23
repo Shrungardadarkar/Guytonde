@@ -359,6 +359,63 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- waveform --- */
+
+.view-toggle {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+
+.view-toggle button {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+}
+
+.view-toggle button:hover {
+  border-color: var(--accent);
+}
+
+.view-toggle button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.view-toggle button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.waveform-wrap {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  overflow: hidden;
+  cursor: text;
+}
+
+.waveform-wrap canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#playheadCanvas {
+  pointer-events: none;
+}
+
 /* --- timeline / meter strip --- */
 
 .strip {
