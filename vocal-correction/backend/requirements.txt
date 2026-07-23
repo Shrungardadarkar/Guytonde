@@ -7,3 +7,5 @@ scipy>=1.11
 soundfile>=0.12
 pyworld>=0.3.4
 python-multipart>=0.0.9
+torch>=2.0
+torchcrepe>=0.0.23

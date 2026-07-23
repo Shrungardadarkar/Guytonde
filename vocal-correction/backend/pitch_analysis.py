@@ -1,22 +1,37 @@
-"""F0 extraction, octave-jump smoothing, note segmentation, and vibrato
-(slow/fast component) separation on the isolated vocal track (§4.2).
+"""F0 extraction, note segmentation, and vibrato (slow/fast component)
+separation on the isolated vocal track (§4.2).
+
+F0 extraction uses torchcrepe (a neural pitch tracker) rather than
+librosa.pyin -- pyin's classical autocorrelation approach was visibly
+unreliable on real vocals (frequent octave errors, low-confidence voicing
+right on vibrato swings, which was the root cause of a note
+over-segmentation bug). torchcrepe is far more robust on real singing and
+needed no hand-rolled octave-jump correction to get clean results.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import librosa
 import numpy as np
+import torch
+import torchcrepe
 from scipy.ndimage import median_filter
 
 from music_theory import hz_to_cents
 
-FRAME_LENGTH = 2048   # ~46ms @ 44.1kHz
 HOP_LENGTH = 512      # ~11.6ms @ 44.1kHz
 FMIN_HZ = 65.0         # ~C2
 FMAX_HZ = 1050.0       # ~C6
-VOICED_PROB_THRESHOLD = 0.5
+
+CREPE_MODEL = "tiny"  # 'full' is ~2-2.3x realtime on CPU (6-9+ min for a real song, no GPU
+                      # on a typical Mac) vs 'tiny' at ~0.17x realtime, with no measured
+                      # accuracy loss on our test cases -- see commit history for benchmarks
+CREPE_BATCH_SIZE = 2048
+CREPE_PERIODICITY_MEDIAN_WIN = 3   # smooths confidence noise, per torchcrepe's own recommended usage
+CREPE_PITCH_MEAN_WIN = 3           # smooths pitch quantization artifacts
+CREPE_PERIODICITY_THRESHOLD = 0.21  # torchcrepe's recommended voiced/unvoiced cutoff
+CREPE_SILENCE_DB = -60.0            # below this loudness, treat as silence regardless of periodicity
 
 REF_HZ = 16.3516  # C0, arbitrary fixed reference so cents values are comparable across notes
 
@@ -24,6 +39,8 @@ NOTE_SPLIT_JUMP_CENTS = 150.0
 NOTE_SPLIT_SUSTAIN_FRAMES = 2  # jump must persist this many frames to count as a new note, not a blip
 MIN_NOTE_FRAMES = 4  # shorter voiced blips are discarded as noise, not notes
 SEGMENTATION_SMOOTH_SECONDS = 0.26  # >= a full vibrato period even at a slow 4Hz (250ms), so segmentation ignores vibrato swings
+JUMP_LOOKBACK_SECONDS = 0.09  # torchcrepe's own temporal smoothing spreads a genuine note change over ~60-70ms,
+                              # so a single-adjacent-frame comparison (fine for pyin) misses it entirely
 
 SLOW_COMPONENT_WINDOW_SECONDS = 0.2  # 150-250ms range from spec, preserves 4-8Hz vibrato as "fast"
 ONSET_SECONDS = 0.045
@@ -51,53 +68,39 @@ class PitchAnalysisResult:
     notes: list = field(default_factory=list)
 
 
-def _smooth_octave_jumps(f0_hz: np.ndarray, voiced_prob: np.ndarray) -> np.ndarray:
-    """pYIN's classic failure mode is snapping to a harmonic (usually an
-    octave up/down). Where a voiced frame sits far from its local median in
-    cents but an octave-shifted version would sit close, assume it's an
-    octave error and correct it (§8 risk item).
-    """
-    f0 = f0_hz.copy()
-    voiced_idx = np.where(~np.isnan(f0))[0]
-    if len(voiced_idx) < 5:
-        return f0
-
-    cents = np.full_like(f0, np.nan)
-    cents[voiced_idx] = np.array([hz_to_cents(REF_HZ, v) for v in f0[voiced_idx]])
-
-    window = 7
-    for i in voiced_idx:
-        lo, hi = max(0, i - window), min(len(f0), i + window + 1)
-        local = cents[lo:hi]
-        local = local[~np.isnan(local)]
-        if len(local) < 3:
-            continue
-        local_median = np.median(local)
-        diff = cents[i] - local_median
-        if abs(diff) > 600.0:  # more than half an octave off the local trend
-            for shift in (-1200.0, 1200.0):
-                if abs(diff + shift) < 100.0:
-                    cents[i] += shift
-                    f0[i] = REF_HZ * (2.0 ** (cents[i] / 1200.0))
-                    break
-    return f0
+def _crepe_device() -> str:
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def extract_f0(vocals_audio: np.ndarray, sr: int) -> PitchAnalysisResult:
-    f0_hz, voiced_flag, voiced_prob = librosa.pyin(
-        vocals_audio,
+    audio = torch.tensor(vocals_audio, dtype=torch.float32).unsqueeze(0)
+    device = _crepe_device()
+
+    pitch, periodicity = torchcrepe.predict(
+        audio,
+        sr,
+        HOP_LENGTH,
         fmin=FMIN_HZ,
         fmax=FMAX_HZ,
-        sr=sr,
-        frame_length=FRAME_LENGTH,
-        hop_length=HOP_LENGTH,
-        fill_na=np.nan,
+        model=CREPE_MODEL,
+        batch_size=CREPE_BATCH_SIZE,
+        device=device,
+        return_periodicity=True,
     )
-    voiced = voiced_flag & (voiced_prob >= VOICED_PROB_THRESHOLD) & ~np.isnan(f0_hz)
-    f0_hz = np.where(voiced, f0_hz, np.nan)
-    f0_hz = _smooth_octave_jumps(f0_hz, voiced_prob)
 
-    frame_times = librosa.frames_to_time(np.arange(len(f0_hz)), sr=sr, hop_length=HOP_LENGTH)
+    periodicity = torchcrepe.filter.median(periodicity, CREPE_PERIODICITY_MEDIAN_WIN)
+    periodicity = torchcrepe.threshold.Silence(CREPE_SILENCE_DB)(periodicity, audio, sr, HOP_LENGTH)
+    pitch = torchcrepe.filter.mean(pitch, CREPE_PITCH_MEAN_WIN)
+
+    voiced = (periodicity >= CREPE_PERIODICITY_THRESHOLD).squeeze(0).numpy()
+    f0_hz = pitch.squeeze(0).to(torch.float64).numpy()
+    f0_hz = np.where(voiced, f0_hz, np.nan)
+
+    frame_times = np.arange(len(f0_hz)) * (HOP_LENGTH / sr)
 
     result = PitchAnalysisResult(
         sr=sr, hop_length=HOP_LENGTH, frame_times=frame_times, f0_hz=f0_hz, voiced=voiced,
@@ -127,6 +130,16 @@ def _segment_notes(result: PitchAnalysisResult) -> list:
     # wide/fast vibrato essentially untouched even at very wide windows.)
     sustain_frames = max(NOTE_SPLIT_SUSTAIN_FRAMES, int(round(SEGMENTATION_SMOOTH_SECONDS / hop_seconds)))
 
+    # torchcrepe's own temporal smoothing spreads a genuine note change over
+    # several frames (a G3->B3 step measured ~60-70ms edge-to-edge in
+    # testing), so comparing only adjacent frames -- which worked fine
+    # against pyin's less-smoothed output -- missed real note changes
+    # entirely. Comparing each frame against one a short lookback behind
+    # catches the full step; the sustained-check above still rejects
+    # vibrato, since a real oscillation reverses back within that window
+    # while a genuine step doesn't.
+    lookback_frames = max(1, int(round(JUMP_LOOKBACK_SECONDS / hop_seconds)))
+
     segments = []
     n = len(voiced)
     i = 0
@@ -137,9 +150,10 @@ def _segment_notes(result: PitchAnalysisResult) -> list:
         start = i
         j = i + 1
         while j < n and voiced[j]:
-            if abs(cents_full[j] - cents_full[j - 1]) > NOTE_SPLIT_JUMP_CENTS:
+            lookback = max(start, j - lookback_frames)
+            if lookback < j and abs(cents_full[j] - cents_full[lookback]) > NOTE_SPLIT_JUMP_CENTS:
                 sustained = all(
-                    k < n and voiced[k] and abs(cents_full[k] - cents_full[j - 1]) > NOTE_SPLIT_JUMP_CENTS / 2
+                    k < n and voiced[k] and abs(cents_full[k] - cents_full[lookback]) > NOTE_SPLIT_JUMP_CENTS / 2
                     for k in range(j, min(j + sustain_frames, n))
                 )
                 if sustained:
