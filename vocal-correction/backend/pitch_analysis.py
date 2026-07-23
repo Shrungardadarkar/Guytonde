@@ -23,6 +23,7 @@ REF_HZ = 16.3516  # C0, arbitrary fixed reference so cents values are comparable
 NOTE_SPLIT_JUMP_CENTS = 150.0
 NOTE_SPLIT_SUSTAIN_FRAMES = 2  # jump must persist this many frames to count as a new note, not a blip
 MIN_NOTE_FRAMES = 4  # shorter voiced blips are discarded as noise, not notes
+SEGMENTATION_SMOOTH_SECONDS = 0.26  # >= a full vibrato period even at a slow 4Hz (250ms), so segmentation ignores vibrato swings
 
 SLOW_COMPONENT_WINDOW_SECONDS = 0.2  # 150-250ms range from spec, preserves 4-8Hz vibrato as "fast"
 ONSET_SECONDS = 0.045
@@ -114,6 +115,18 @@ def _segment_notes(result: PitchAnalysisResult) -> list:
     valid = ~np.isnan(f0_hz)
     cents_full[valid] = np.array([hz_to_cents(REF_HZ, v) for v in f0_hz[valid]])
 
+    # Vibrato (4-8Hz, i.e. a 125-250ms period) swings well past
+    # NOTE_SPLIT_JUMP_CENTS within a fraction of a cycle, so a jump has to
+    # stay away from the pre-jump baseline for a full vibrato period, not
+    # just a couple of frames, to count as a genuine new note rather than an
+    # ordinary oscillation. A real vibrato swing reverses and dips back
+    # below half the threshold within that window; a real note change
+    # doesn't. (A median-filtered "trend" signal was tried first as a
+    # cleaner-looking fix, but median filters don't suppress continuous
+    # oscillations -- they're built to reject one-off spikes -- and left
+    # wide/fast vibrato essentially untouched even at very wide windows.)
+    sustain_frames = max(NOTE_SPLIT_SUSTAIN_FRAMES, int(round(SEGMENTATION_SMOOTH_SECONDS / hop_seconds)))
+
     segments = []
     n = len(voiced)
     i = 0
@@ -127,7 +140,7 @@ def _segment_notes(result: PitchAnalysisResult) -> list:
             if abs(cents_full[j] - cents_full[j - 1]) > NOTE_SPLIT_JUMP_CENTS:
                 sustained = all(
                     k < n and voiced[k] and abs(cents_full[k] - cents_full[j - 1]) > NOTE_SPLIT_JUMP_CENTS / 2
-                    for k in range(j, min(j + NOTE_SPLIT_SUSTAIN_FRAMES, n))
+                    for k in range(j, min(j + sustain_frames, n))
                 )
                 if sustained:
                     break
