@@ -24,8 +24,12 @@ fi
 
 source .venv/bin/activate
 
-if [ ! -f ".venv/.deps_installed" ]; then
-  echo "Installing the audio processing libraries (first run only)..."
+# Re-run pip install whenever requirements.txt changes (e.g. after updating
+# the app), not just on the very first launch -- a stale marker file would
+# otherwise silently skip newly-added dependencies.
+REQS_HASH="$(shasum -a 256 requirements.txt | awk '{print $1}')"
+if [ ! -f ".venv/.deps_hash" ] || [ "$(cat .venv/.deps_hash)" != "$REQS_HASH" ]; then
+  echo "Installing the audio processing libraries (only needed after updates)..."
   pip install --upgrade pip
   if ! pip install -r requirements.txt; then
     echo ""
@@ -36,7 +40,7 @@ if [ ! -f ".venv/.deps_installed" ]; then
     read -p "Press Enter to close this window..."
     exit 1
   fi
-  touch ".venv/.deps_installed"
+  echo "$REQS_HASH" > ".venv/.deps_hash"
 fi
 
 echo ""
