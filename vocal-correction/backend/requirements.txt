@@ -1,4 +1,4 @@
-setuptools>=69
+setuptools>=69,<81
 fastapi>=0.110
 uvicorn[standard]>=0.29
 librosa>=0.10
