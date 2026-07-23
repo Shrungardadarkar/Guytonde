@@ -20,6 +20,14 @@ from correction import CorrectionResult
 
 FRAME_PERIOD_MS = 5.0
 
+# WORLD reconstructs the waveform from (F0, envelope, aperiodicity) with a
+# different phase realization than the original recording, so its output can
+# peak louder than the source even though nothing was boosted -- on real
+# vocals (denser harmonics than a synthetic test tone) this reliably clips.
+# Scale down (never up) to a safe ceiling so nothing downstream -- playback,
+# the blend crossfade, the final WAV export -- ever has to clip.
+PEAK_HEADROOM_DB = -1.0
+
 
 def resynthesize(vocals_audio: np.ndarray, sr: int, correction: CorrectionResult) -> np.ndarray:
     x = vocals_audio.astype(np.float64)
@@ -36,4 +44,11 @@ def resynthesize(vocals_audio: np.ndarray, sr: int, correction: CorrectionResult
     corrected_f0[voiced] = f0_world[voiced] * (2.0 ** (delta_interp[voiced] / 1200.0))
 
     y = pw.synthesize(corrected_f0, sp, ap, sr, frame_period=FRAME_PERIOD_MS)
-    return y.astype(np.float32)
+    y = y.astype(np.float32)
+
+    peak = float(np.max(np.abs(y))) if y.size else 0.0
+    ceiling = 10.0 ** (PEAK_HEADROOM_DB / 20.0)
+    if peak > ceiling:
+        y *= ceiling / peak
+
+    return y

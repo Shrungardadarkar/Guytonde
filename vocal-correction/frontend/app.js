@@ -564,6 +564,20 @@ function encodeWav(audioBuffer) {
   const blockAlign = numChannels * bytesPerSample;
   const dataSize = numFrames * blockAlign;
 
+  // Peak-safe scale-down (never boost) instead of a hard per-sample clamp --
+  // clamping crushes only the loudest samples and sounds like crackly
+  // clipping; scaling the whole buffer down preserves the waveform shape.
+  let peak = 0;
+  for (let ch = 0; ch < numChannels; ch++) {
+    const data = audioBuffer.getChannelData(ch);
+    for (let i = 0; i < numFrames; i++) {
+      const abs = Math.abs(data[i]);
+      if (abs > peak) peak = abs;
+    }
+  }
+  const ceiling = 10 ** (-0.5 / 20); // -0.5 dBFS headroom, matches backend
+  const scale = peak > ceiling ? ceiling / peak : 1;
+
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
 
@@ -591,7 +605,9 @@ function encodeWav(audioBuffer) {
   let offset = 44;
   for (let i = 0; i < numFrames; i++) {
     for (let ch = 0; ch < numChannels; ch++) {
-      const sample = Math.max(-1, Math.min(1, channelData[ch][i]));
+      // Still clamp as a last-resort safety net -- should be a no-op now
+      // that `scale` already keeps everything under the ceiling.
+      const sample = Math.max(-1, Math.min(1, channelData[ch][i] * scale));
       view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
       offset += 2;
     }
