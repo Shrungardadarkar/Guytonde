@@ -9,6 +9,27 @@ cd "$(dirname "$0")"
 echo "Vocal Tuning Correction -- starting local engine..."
 echo ""
 
+# Auto-update: pull the latest fixes before starting, so double-clicking this
+# is always enough -- no manual git commands needed. Only runs if this is a
+# git clone (see the README) and only fast-forwards, so it never overwrites
+# anything of yours or gets stuck resolving conflicts.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$REPO_ROOT" ]; then
+  echo "Checking for updates..."
+  if git -C "$REPO_ROOT" pull --ff-only 2>/tmp/vtc_git_pull.log; then
+    :
+  else
+    echo "Couldn't check for updates (no internet, or local changes are in the"
+    echo "way) -- continuing with what's already here. Details:"
+    cat /tmp/vtc_git_pull.log
+  fi
+  echo ""
+else
+  echo "(Not a git clone -- skipping auto-update. See the README to switch to"
+  echo "one so updates apply automatically next time.)"
+  echo ""
+fi
+
 if ! command -v python3 >/dev/null 2>&1; then
   echo "Python 3 isn't installed on this Mac yet."
   echo "Install it from https://www.python.org/downloads/macos/ (get the latest"

@@ -12,23 +12,41 @@ the screen you see -- the actual audio processing runs on your own Mac in the
 background, so your audio is never uploaded anywhere. To start that
 background piece:
 
-1. Go to the repo's green **Code** button on GitHub > **Download ZIP**, then
-   unzip it.
-2. Open the unzipped folder > `vocal-correction` > `backend`.
-3. Double-click **`start-mac.command`**.
+**One-time setup** -- open the Terminal app and paste:
+```
+cd ~/Downloads && git clone https://github.com/Shrungardadarkar/Guytonde.git
+```
+This creates `~/Downloads/Guytonde`. (If `git` says "command not found," run
+`xcode-select --install` in Terminal first, let that finish, then retry.)
+
+**Every time you want to use the tool:**
+
+1. Open `Guytonde` > `vocal-correction` > `backend`.
+2. Double-click **`start-mac.command`**.
    - The first time, macOS may say it's from an unidentified developer --
      right-click the file, choose **Open**, then confirm. You only need to
      do this once.
-   - The first run also takes a few minutes to set itself up (installing the
-     audio libraries). Later runs start in a few seconds.
+   - It automatically checks for and pulls the latest fixes before starting
+     -- you never need to run `git pull` yourself.
+   - The very first run also takes a few minutes to set itself up
+     (installing the audio libraries). Later runs start in seconds unless an
+     update added something new to install.
    - Leave the black terminal window open while you use the tool -- it's the
      engine running. Once it prints `Uvicorn running on http://127.0.0.1:8000`,
      it's ready.
-4. Open **https://shrungardadarkar.github.io/Guytonde/** in your browser and
+3. Open **https://shrungardadarkar.github.io/Guytonde/** in your browser and
    use the tool as normal. Closing the terminal window stops the engine.
 
-If step 3 fails with something about "command line tools," open the Terminal
-app and run `xcode-select --install`, let that finish, then try step 3 again.
+If step 2 fails with something about "command line tools," open the Terminal
+app and run `xcode-select --install`, let that finish, then try step 2 again.
+
+<details>
+<summary>If you already have a ZIP-downloaded copy from before</summary>
+
+Delete that folder and switch to the `git clone` steps above -- a plain ZIP
+download can't auto-update itself, so you'd be back to manually
+re-downloading every time there's a fix.
+</details>
 
 ## Run the backend (for developers)
 
